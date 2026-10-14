@@ -15,9 +15,11 @@ AirPods don't report battery over standard Bluetooth, so the extension reads the
 - The case appears in the menu (in the top bar only when it's the only thing reporting)
 - Levels come in steps of 10%
 
-It only scans while Apple headphones are connected, for 6 seconds once a minute and whenever you open the menu, and only shows broadcasts from the same model as your connected AirPods.
+While Apple headphones are connected it keeps a low-energy Bluetooth scan running, so the rings update the moment you take a bud out or put it back. The scan stops as soon as they disconnect, and only broadcasts from the same model as your connected AirPods are used.
 
 ## Other devices
+
+The rings sit just left of the [Now Playing](https://github.com/voidrlm/gnome-now-playing) pill when that extension is installed.
 
 Anything that reports its battery to Linux (through UPower) is shown with a matching icon: headphones, headsets, speakers, mice, keyboards, touchpads, game controllers, pens and tablets, phones, remotes, cameras and more. Up to 4 rings fit in the top bar; the menu lists everything.
 

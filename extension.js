@@ -47,10 +47,13 @@ const ICONS = {
 const SKIP_KINDS = new Set(['line-power', 'battery', 'ups']);
 
 // AirPods don't report battery over standard Bluetooth; they broadcast it in
-// Apple "proximity pairing" adverts instead, which need a short LE scan.
+// Apple "proximity pairing" adverts instead. While they're connected an LE
+// scan runs and each advert updates the rings as it arrives.
 const APPLE = 0x004c;
-const SCAN_EVERY_SECONDS = 60;
-const SCAN_SECONDS = 6;
+// Fallback check (connections, a scan BlueZ dropped, stale readings).
+const REFRESH_SECONDS = 30;
+// Adverts older than this don't count when picking the current reading.
+const FRESH_MS = 15e3;
 // Forget a reading if no advert has been seen for this long.
 const STALE_MS = 3 * 60e3;
 
@@ -144,6 +147,8 @@ export default class BluetoothBattery extends Extension {
         this._devices = new Map();
         // BlueZ path of a connected Apple audio device -> {alias, model, reading, seen}
         this._airpods = new Map();
+        // BlueZ path of an advertiser -> {r: parsed advert, rssi, t}
+        this._adverts = new Map();
         this._cancellable = new Gio.Cancellable();
 
         this._button = new PanelMenu.Button(0.5, this.metadata.name);
@@ -153,14 +158,21 @@ export default class BluetoothBattery extends Extension {
         this._section = new PopupMenu.PopupMenuSection();
         this._button.menu.addMenuItem(this._section);
         this._button.menu.connect('open-state-changed', (m, open) => {
-            if (open) this._scan();
+            if (open) this._refresh();
         });
 
-        // Just left of the system menu (Wi-Fi, volume, battery).
-        const rightBox = Main.panel._rightBox;
-        const qs = Main.panel.statusArea.quickSettings?.container;
-        const idx = qs ? Math.max(0, rightBox.get_children().indexOf(qs)) : 0;
-        Main.panel.addToStatusArea(this.uuid, this._button, idx, 'right');
+        // Directly left of Now Playing, and kept there as other items load.
+        Main.panel.addToStatusArea(this.uuid, this._button, 0, 'right');
+        this._placeBesideMusic();
+        Main.panel._rightBox.connectObject('child-added', () => {
+            // After Now Playing's own handler has moved it to the front.
+            if (this._placeId) return;
+            this._placeId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._placeId = 0;
+                this._placeBesideMusic();
+                return GLib.SOURCE_REMOVE;
+            });
+        }, this);
 
         this._client = UPower.Client.new_full(null);
         // Not get_devices2(): under GJS its devices get freed while still in use.
@@ -179,11 +191,30 @@ export default class BluetoothBattery extends Extension {
             this);
         this._sync();
 
-        this._scan();
-        this._scanId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, SCAN_EVERY_SECONDS, () => {
-            this._scan();
+        // Every BlueZ device property change: connections, and adverts while
+        // scanning.
+        this._propsSub = Gio.DBus.system.signal_subscribe('org.bluez', 'org.freedesktop.DBus.Properties',
+            'PropertiesChanged', null, 'org.bluez.Device1', Gio.DBusSignalFlags.NONE,
+            (conn, sender, path, iface, signal, params) => this._onDeviceChanged(path, params.deepUnpack()[1]));
+        this._refresh();
+        this._refreshId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, REFRESH_SECONDS, () => {
+            this._refresh();
             return GLib.SOURCE_CONTINUE;
         });
+    }
+
+    // Now Playing moves itself to the front of the right side; this runs
+    // after it and slots in just before it. Moving doesn't fire child-added,
+    // so the two don't fight.
+    _placeBesideMusic() {
+        const box = Main.panel._rightBox;
+        const music = Main.panel.statusArea['now-playing@arjun']?.container;
+        const me = this._button?.container;
+        if (!me || !music || music.get_parent() !== box) return;
+        const kids = box.get_children();
+        const mi = kids.indexOf(music), ci = kids.indexOf(me);
+        const want = ci < mi ? mi - 1 : mi;
+        if (ci !== want) box.set_child_at_index(me, want);
     }
 
     _track(d) {
@@ -213,21 +244,72 @@ export default class BluetoothBattery extends Extension {
         return Object.entries(reply.deepUnpack()[0]);
     }
 
-    // Only scans while Apple headphones without a standard battery report are
-    // connected, and only briefly, so normal Bluetooth use isn't disturbed.
-    async _scan() {
-        if (this._scanning) return;
-        this._scanning = true;
-        let adapter = null;
+    _onDeviceChanged(path, changed) {
+        if ('Connected' in changed) {
+            this._refresh();
+            return;
+        }
+        const data = changed.ManufacturerData?.deepUnpack()?.[APPLE];
+        const r = data && parseAirPods(unpackBytes(data));
+        const ad = this._adverts.get(path);
+        if (r) {
+            const rssi = changed.RSSI?.unpack() ?? ad?.rssi ?? -999;
+            this._adverts.set(path, {r, rssi, t: Date.now()});
+        } else if (ad && 'RSSI' in changed) {
+            ad.rssi = changed.RSSI.unpack();
+            ad.t = Date.now();
+        } else {
+            return;
+        }
+        this._applyAdverts();
+    }
+
+    // Picks each connected AirPods' reading from fresh adverts of the same
+    // model; the strongest wins, since the buds you're wearing are closest.
+    _applyAdverts() {
+        const now = Date.now();
+        let changed = false;
+        for (const [path, ad] of this._adverts) {
+            if (now - ad.t > STALE_MS) this._adverts.delete(path);
+        }
+        for (const a of this._airpods.values()) {
+            let best = null;
+            for (const ad of this._adverts.values()) {
+                if (ad.r.model === a.model && now - ad.t < FRESH_MS && (!best || ad.rssi > best.rssi))
+                    best = ad;
+            }
+            const before = JSON.stringify(a.reading);
+            if (best) {
+                a.reading = best.r;
+                a.seen = best.t;
+            } else if (now - a.seen > STALE_MS) {
+                a.reading = null;
+            }
+            changed ||= JSON.stringify(a.reading) !== before;
+        }
+        if (changed) this._queueSync();
+    }
+
+    // Finds connected Apple headphones and keeps an LE scan running only
+    // while there are some.
+    async _refresh() {
+        if (this._refreshing) {
+            this._refreshAgain = true;
+            return;
+        }
+        this._refreshing = true;
         try {
+            let adapter = null;
             const connected = new Map();
-            for (const [path, ifaces] of await this._objects()) {
+            const objects = await this._objects();
+            for (const [path, ifaces] of objects) {
                 if (ifaces['org.bluez.Adapter1']?.Powered?.unpack()) adapter ??= path;
                 const d = ifaces['org.bluez.Device1'];
                 const m = d?.Modalias?.unpack().match(/^bluetooth:v004Cp([0-9A-F]{4})/i);
                 if (m && d.Connected?.unpack() && d.Icon?.unpack().startsWith('audio'))
                     connected.set(path, {alias: d.Alias?.unpack() ?? 'AirPods', model: parseInt(m[1], 16)});
             }
+            if (!this._button) return;
             for (const path of [...this._airpods.keys()]) {
                 if (!connected.has(path)) this._airpods.delete(path);
             }
@@ -235,57 +317,48 @@ export default class BluetoothBattery extends Extension {
                 const old = this._airpods.get(path);
                 this._airpods.set(path, {...info, reading: old?.reading ?? null, seen: old?.seen ?? 0});
             }
-            if (!connected.size || !adapter) return;
 
-            await this._bluez(adapter, 'org.bluez.Adapter1', 'SetDiscoveryFilter',
-                new GLib.Variant('(a{sv})', [{
-                    Transport: new GLib.Variant('s', 'le'),
-                    DuplicateData: new GLib.Variant('b', true),
-                }]));
-            try {
-                await this._bluez(adapter, 'org.bluez.Adapter1', 'StartDiscovery', null);
-                this._discovering = adapter;
-            } catch (e) {
-                // Already discovering for us; read what's there.
-            }
-            await new Promise(resolve => {
-                this._waitId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, SCAN_SECONDS, () => {
-                    this._waitId = 0;
-                    resolve();
-                    return GLib.SOURCE_REMOVE;
-                });
-            });
-            if (!this._button) return;
-
-            // Strongest advert per model wins: the buds being worn are closest.
-            const best = new Map();
-            for (const [, ifaces] of await this._objects()) {
-                const d = ifaces['org.bluez.Device1'];
-                const data = d?.ManufacturerData?.deepUnpack()?.[APPLE];
-                if (!data) continue;
-                const r = parseAirPods(unpackBytes(data));
-                const rssi = d.RSSI?.unpack() ?? -999;
-                if (r && (!best.has(r.model) || rssi > best.get(r.model).rssi))
-                    best.set(r.model, {r, rssi});
-            }
-            const now = Date.now();
-            for (const a of this._airpods.values()) {
-                const hit = best.get(a.model);
-                if (hit) {
-                    a.reading = hit.r;
-                    a.seen = now;
-                } else if (now - a.seen > STALE_MS) {
-                    a.reading = null;
+            if (connected.size && adapter) {
+                // Adverts BlueZ already has, so the rings fill in straight away.
+                for (const [path, ifaces] of objects) {
+                    const d = ifaces['org.bluez.Device1'];
+                    const data = d?.ManufacturerData?.deepUnpack()?.[APPLE];
+                    const r = data && parseAirPods(unpackBytes(data));
+                    if (r && !this._adverts.has(path))
+                        this._adverts.set(path, {r, rssi: d.RSSI?.unpack() ?? -999, t: Date.now()});
                 }
+                await this._startDiscovery(adapter);
+            } else {
+                this._stopDiscovery();
             }
+            this._applyAdverts();
+            this._queueSync();
         } catch (e) {
             if (this._button && !e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 console.error(`${this.uuid}: ${e}`);
         } finally {
-            this._stopDiscovery();
-            this._scanning = false;
-            if (this._button) this._sync();
+            this._refreshing = false;
+            if (this._refreshAgain && this._button) {
+                this._refreshAgain = false;
+                this._refresh();
+            }
         }
+    }
+
+    // Called on every refresh: if BlueZ dropped the scan (adapter reset,
+    // suspend) this starts it again; if it's running, BlueZ says InProgress.
+    async _startDiscovery(adapter) {
+        await this._bluez(adapter, 'org.bluez.Adapter1', 'SetDiscoveryFilter',
+            new GLib.Variant('(a{sv})', [{
+                Transport: new GLib.Variant('s', 'le'),
+                DuplicateData: new GLib.Variant('b', true),
+            }]));
+        try {
+            await this._bluez(adapter, 'org.bluez.Adapter1', 'StartDiscovery', null);
+        } catch (e) {
+            if (!Gio.DBusError.get_remote_error(e)?.endsWith('InProgress')) throw e;
+        }
+        this._discovering = adapter;
     }
 
     // Not tied to the cancellable, so it still runs from disable().
@@ -362,7 +435,12 @@ export default class BluetoothBattery extends Extension {
     }
 
     disable() {
-        for (const id of ['_syncId', '_scanId', '_waitId']) {
+        if (this._propsSub) {
+            Gio.DBus.system.signal_unsubscribe(this._propsSub);
+            this._propsSub = 0;
+        }
+        Main.panel._rightBox.disconnectObject(this);
+        for (const id of ['_syncId', '_refreshId', '_placeId']) {
             if (this[id]) {
                 GLib.source_remove(this[id]);
                 this[id] = 0;
@@ -374,7 +452,7 @@ export default class BluetoothBattery extends Extension {
         this._client?.disconnectObject(this);
         this._button?.destroy();
         this._button = this._panelBox = this._section = this._client = this._devices = null;
-        this._airpods = this._cancellable = null;
-        this._scanning = false;
+        this._airpods = this._adverts = this._cancellable = null;
+        this._refreshing = this._refreshAgain = false;
     }
 }

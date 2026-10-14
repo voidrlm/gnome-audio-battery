@@ -1,0 +1,8 @@
+.btbat-box { spacing: 4px; }
+
+.btbat-menu { min-width: 260px; }
+.btbat-device { spacing: 8px; padding: 4px 0 8px 0; }
+.btbat-name { font-weight: bold; }
+.btbat-tiles { spacing: 18px; }
+.btbat-tile { spacing: 6px; min-width: 56px; }
+.btbat-tile-label { font-size: 0.85em; color: rgba(255,255,255,0.7); }

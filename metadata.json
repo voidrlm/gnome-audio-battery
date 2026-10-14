@@ -1,0 +1,6 @@
+{
+  "uuid": "bluetooth-battery@arjun",
+  "name": "Bluetooth Battery",
+  "description": "Battery levels of Bluetooth and wireless devices (AirPods, headphones, mice, keyboards, controllers) as macOS-style rings in the top bar.",
+  "shell-version": ["50"]
+}

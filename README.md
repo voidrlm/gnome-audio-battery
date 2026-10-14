@@ -4,6 +4,8 @@ A GNOME Shell extension that shows the battery of your AirPods, headphones, head
 
 ![AirPods battery rings in the top bar](screenshots/panel.png)
 
+![Left and right AirPods in the menu](screenshots/menu.png)
+
 - Rings sit together in a rounded pill that matches the [Now Playing](https://github.com/voidrlm/gnome-now-playing) pill, just left of it when that extension is installed
 - Each ring fills with the battery level: green, yellow at 40% or below, red at 20% or below, green while charging
 - Click to see each device with larger rings and labels

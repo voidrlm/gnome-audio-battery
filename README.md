@@ -2,6 +2,7 @@
 
 A GNOME Shell extension that shows the battery of your Bluetooth and wireless devices in the top bar, as rings around each device's icon, like the batteries widget on macOS.
 
+- Rings sit together in a rounded pill that matches the Now Playing pill
 - Each ring fills with the battery level: green, yellow at 40% or below, red at 20% or below, green while charging
 - Click to see every device, with larger rings and labels
 - Hidden when nothing with a battery is connected

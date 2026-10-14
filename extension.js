@@ -12,6 +12,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 Gio._promisify(Gio.DBusConnection.prototype, 'call');
 
+// Same pill height as Now Playing, so the two sit together.
+const PILL_HEIGHT = 22;
 // Only this many rings fit in the panel; the menu lists everything.
 const MAX_IN_PANEL = 4;
 // Ring colour: green, then yellow at or below WARN, red at or below LOW.
@@ -152,7 +154,12 @@ export default class BluetoothBattery extends Extension {
         this._cancellable = new Gio.Cancellable();
 
         this._button = new PanelMenu.Button(0.5, this.metadata.name);
-        this._panelBox = new St.BoxLayout({style_class: 'btbat-box'});
+        this._button.add_style_class_name('btbat-panel');
+        this._panelBox = new St.BoxLayout({
+            style_class: 'btbat-pill',
+            height: PILL_HEIGHT,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
         this._button.add_child(this._panelBox);
         this._button.menu.box.add_style_class_name('btbat-menu');
         this._section = new PopupMenu.PopupMenuSection();
@@ -408,7 +415,7 @@ export default class BluetoothBattery extends Extension {
 
         this._panelBox.destroy_all_children();
         for (const part of groups.flatMap(g => g.parts.filter(p => p.inPanel)).slice(0, MAX_IN_PANEL))
-            this._panelBox.add_child(batteryRing(part, 20, 2, 11));
+            this._panelBox.add_child(batteryRing(part, 18, 2, 10));
 
         this._section.removeAll();
         for (const g of groups) {

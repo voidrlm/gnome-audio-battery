@@ -1,4 +1,12 @@
-.btbat-box { spacing: 4px; }
+/* Same pill as Now Playing: 7px corners, translucent white fill. */
+.panel-button.btbat-panel { -natural-hpadding: 3px; -minimum-hpadding: 2px; }
+.btbat-pill {
+    border-radius: 7px;
+    padding: 0 6px;
+    spacing: 5px;
+    background-color: rgba(255,255,255,0.12);
+}
+.btbat-panel:hover .btbat-pill { background-color: rgba(255,255,255,0.18); }
 
 .btbat-menu { min-width: 260px; }
 .btbat-device { spacing: 8px; padding: 4px 0 8px 0; }

@@ -25,28 +25,8 @@ const ICONS = {
     'headset': 'audio-headset-symbolic',
     'headphones': 'audio-headphones-symbolic',
     'speakers': 'audio-speakers-symbolic',
-    'mouse': 'input-mouse-symbolic',
-    'keyboard': 'input-keyboard-symbolic',
-    'touchpad': 'input-touchpad-symbolic',
-    'gaming-input': 'input-gaming-symbolic',
-    'pen': 'input-tablet-symbolic',
-    'tablet': 'input-tablet-symbolic',
-    'phone': 'phone-symbolic',
-    'media-player': 'multimedia-player-symbolic',
-    'computer': 'computer-symbolic',
-    'pda': 'phone-symbolic',
-    'modem': 'network-cellular-symbolic',
-    'network': 'network-wireless-symbolic',
-    'video': 'camera-video-symbolic',
     'other-audio': 'audio-speakers-symbolic',
-    'remote-control': 'media-playback-start-symbolic',
-    'printer': 'printer-symbolic',
-    'scanner': 'scanner-symbolic',
-    'camera': 'camera-photo-symbolic',
-    'toy': 'applications-games-symbolic',
 };
-// The laptop's own battery and chargers are already shown by GNOME.
-const SKIP_KINDS = new Set(['line-power', 'battery', 'ups']);
 
 // AirPods don't report battery over standard Bluetooth; they broadcast it in
 // Apple "proximity pairing" adverts instead. While they're connected an LE
@@ -63,8 +43,9 @@ function kindOf(d) {
     return UPower.Device.kind_to_string(d.kind);
 }
 
-function isPeripheral(d) {
-    return !d.power_supply && !SKIP_KINDS.has(kindOf(d)) && d.is_present;
+// Audio devices only: headphones, headsets and speakers.
+function isAudio(d) {
+    return !d.power_supply && kindOf(d) in ICONS && d.is_present;
 }
 
 function nameOf(d) {
@@ -383,11 +364,11 @@ export default class BluetoothBattery extends Extension {
         const themed = name => Gio.ThemedIcon.new(name);
         const file = name => Gio.icon_new_for_string(`${this.path}/icons/${name}.svg`);
         const groups = [];
-        for (const d of [...this._devices.values()].filter(isPeripheral)) {
+        for (const d of [...this._devices.values()].filter(isAudio)) {
             const kind = kindOf(d);
             groups.push({name: nameOf(d), parts: [{
-                icon: themed(ICONS[kind] ?? 'bluetooth-active-symbolic'),
-                label: kind === 'unknown' ? 'Battery' : kind.charAt(0).toUpperCase() + kind.slice(1).replace('-', ' '),
+                icon: themed(ICONS[kind]),
+                label: kind.charAt(0).toUpperCase() + kind.slice(1).replace('-', ' '),
                 pct: Math.round(d.percentage),
                 charging: d.state === UPower.DeviceState.CHARGING,
                 inPanel: true,

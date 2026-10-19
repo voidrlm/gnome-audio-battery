@@ -10,6 +10,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
+import {identify, SHAPE_LABELS} from './brands.js';
+
 Gio._promisify(Gio.DBusConnection.prototype, 'call');
 
 // Same pill height as Now Playing, so the two sit together.
@@ -21,12 +23,8 @@ const WARN = 40;
 const LOW = 20;
 const COLORS = {ok: [0.34, 0.89, 0.54], warn: [0.96, 0.83, 0.18], low: [1, 0.42, 0.37]};
 
-const ICONS = {
-    'headset': 'audio-headset-symbolic',
-    'headphones': 'audio-headphones-symbolic',
-    'speakers': 'audio-speakers-symbolic',
-    'other-audio': 'audio-speakers-symbolic',
-};
+// UPower kinds counted as audio.
+const AUDIO_KINDS = new Set(['headset', 'headphones', 'speakers', 'other-audio']);
 
 // AirPods don't report battery over standard Bluetooth; they broadcast it in
 // Apple "proximity pairing" adverts instead. While they're connected an LE
@@ -45,7 +43,7 @@ function kindOf(d) {
 
 // Audio devices only: headphones, headsets and speakers.
 function isAudio(d) {
-    return !d.power_supply && kindOf(d) in ICONS && d.is_present;
+    return !d.power_supply && AUDIO_KINDS.has(kindOf(d)) && d.is_present;
 }
 
 function nameOf(d) {
@@ -361,14 +359,13 @@ export default class BluetoothBattery extends Extension {
     // charging, inPanel}]}. Only parts that are actually reporting are
     // included, so a single AirPod shows on its own.
     _groups() {
-        const themed = name => Gio.ThemedIcon.new(name);
         const file = name => Gio.icon_new_for_string(`${this.path}/icons/${name}.svg`);
         const groups = [];
         for (const d of [...this._devices.values()].filter(isAudio)) {
-            const kind = kindOf(d);
-            groups.push({name: nameOf(d), parts: [{
-                icon: themed(ICONS[kind]),
-                label: kind.charAt(0).toUpperCase() + kind.slice(1).replace('-', ' '),
+            const {brand, shape} = identify(d.model, kindOf(d));
+            groups.push({name: nameOf(d), brand, parts: [{
+                icon: file(shape),
+                label: SHAPE_LABELS[shape],
                 pct: Math.round(d.percentage),
                 charging: d.state === UPower.DeviceState.CHARGING,
                 inPanel: true,
@@ -385,7 +382,7 @@ export default class BluetoothBattery extends Extension {
                 .map(([label, icon, pct, charging, inPanel]) => ({icon: file(icon), label, pct, charging, inPanel}));
             // Only the case reporting (buds away): show it in the panel then.
             if (parts.length && !parts.some(p => p.inPanel)) parts[0].inPanel = true;
-            if (parts.length) groups.push({name: a.alias, parts});
+            if (parts.length) groups.push({name: a.alias, brand: 'Apple', parts});
         }
         return groups;
     }
@@ -396,13 +393,17 @@ export default class BluetoothBattery extends Extension {
 
         this._panelBox.destroy_all_children();
         for (const part of groups.flatMap(g => g.parts.filter(p => p.inPanel)).slice(0, MAX_IN_PANEL))
-            this._panelBox.add_child(batteryRing(part, 18, 2, 10));
+            this._panelBox.add_child(batteryRing(part, 18, 2, 11));
 
         this._section.removeAll();
         for (const g of groups) {
             const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
             const box = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'btbat-device'});
-            box.add_child(new St.Label({text: g.name, style_class: 'btbat-name'}));
+            const header = new St.BoxLayout({vertical: true});
+            if (g.brand && !g.name.toLowerCase().includes(g.brand.toLowerCase()))
+                header.add_child(new St.Label({text: g.brand.toUpperCase(), style_class: 'btbat-brand'}));
+            header.add_child(new St.Label({text: g.name, style_class: 'btbat-name'}));
+            box.add_child(header);
             const tiles = new St.BoxLayout({style_class: 'btbat-tiles'});
             for (const part of g.parts) {
                 const tile = new St.BoxLayout({vertical: true, style_class: 'btbat-tile'});
@@ -410,7 +411,12 @@ export default class BluetoothBattery extends Extension {
                 ring.x_align = Clutter.ActorAlign.CENTER;
                 tile.add_child(ring);
                 tile.add_child(new St.Label({
-                    text: part.charging ? `${part.label} · charging` : part.label,
+                    text: part.charging ? `${part.pct}% · charging` : `${part.pct}%`,
+                    style_class: 'btbat-tile-pct',
+                    x_align: Clutter.ActorAlign.CENTER,
+                }));
+                tile.add_child(new St.Label({
+                    text: part.label,
                     style_class: 'btbat-tile-label',
                     x_align: Clutter.ActorAlign.CENTER,
                 }));

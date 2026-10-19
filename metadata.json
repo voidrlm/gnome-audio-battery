@@ -1,6 +1,6 @@
 {
   "uuid": "audio-battery@arjun",
   "name": "Audio Battery",
-  "description": "Battery levels of AirPods, headphones, headsets and speakers as macOS-style rings in a top-bar pill, updated in real time.",
+  "description": "Battery levels of AirPods, earbuds, headphones, headsets and speakers from 50+ brands as macOS-style rings in a top-bar pill, updated in real time.",
   "shell-version": ["50"]
 }

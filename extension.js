@@ -398,15 +398,15 @@ export default class BluetoothBattery extends Extension {
         this._section.removeAll();
         for (const g of groups) {
             const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
-            const box = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'btbat-device'});
-            const header = new St.BoxLayout({vertical: true});
+            const box = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true, style_class: 'btbat-device'});
+            const header = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL});
             if (g.brand && !g.name.toLowerCase().includes(g.brand.toLowerCase()))
                 header.add_child(new St.Label({text: g.brand.toUpperCase(), style_class: 'btbat-brand'}));
             header.add_child(new St.Label({text: g.name, style_class: 'btbat-name'}));
             box.add_child(header);
             const tiles = new St.BoxLayout({style_class: 'btbat-tiles'});
             for (const part of g.parts) {
-                const tile = new St.BoxLayout({vertical: true, style_class: 'btbat-tile'});
+                const tile = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'btbat-tile'});
                 const ring = batteryRing(part, 44, 3.5, 20);
                 ring.x_align = Clutter.ActorAlign.CENTER;
                 tile.add_child(ring);
